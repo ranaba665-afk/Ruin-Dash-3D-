@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ruin Dash Admin</title>
+<style>
+body{margin:0 auto;background:#10141c;color:#fff;font-family:system-ui,sans-serif;padding:14px;max-width:760px}
+button{background:#ff9f1c;color:#000;border:0;border-radius:10px;padding:10px 14px;font-weight:700;font-size:15px}
+button.g{background:#2a2f48;color:#fff}button.r{background:#a33;color:#fff}button:disabled{opacity:.4}
+.tabs{display:flex;gap:6px;margin:10px 0}.tabs button{flex:1;background:#2a2f48;color:#fff}.tabs button.on{background:#ff9f1c;color:#000}
+.card{background:#1b2231;border:1px solid #2f3a55;border-radius:12px;padding:12px;margin:8px 0}
+.row{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0}
+small{opacity:.7}select{padding:9px;border-radius:8px;border:1px solid #444;background:#0e131c;color:#fff;font-size:15px}
+.pend{color:#ffd166}.paid{color:#7dffb0}.rej{color:#ff8a8a}#msg{color:#ff8a8a;margin:8px 0}
+</style></head><body>
+<h2>Ruin Dash 3D · Admin</h2>
+<div id="who"><button id="login">Sign in with Google</button></div>
+<div id="msg"></div>
+<div id="panel" hidden>
+ <div class="tabs"><button data-t="wd" class="on">Withdrawals</button><button data-t="st">Prizes</button></div>
+ <section id="wd"></section>
+ <section id="st" hidden>
+  <div class="row"><select id="per"><option value="daily">Daily</option><option value="weekly">Weekly</option></select><select id="off"></select><button id="ld" class="g">Load winners</button></div>
+  <div id="win"></div>
+ </section>
+</div>
+<script type="module">
+import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import {getAuth,signInWithPopup,GoogleAuthProvider,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+import {getFirestore,collection,doc,getDoc,getDocs,query,orderBy,limit,writeBatch,increment,runTransaction} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+// >>> put your own Google account email here (and the same email in firestore.rules)
+const ADMIN_EMAILS=['YOUR_ADMIN_EMAIL@gmail.com'];
+const cfg={apiKey:"AIzaSyBj6uQByz9wGEZ_qtB2lDAWbZCoIZMfLiU",authDomain:"ruin-dash-3d.firebaseapp.com",projectId:"ruin-dash-3d",storageBucket:"ruin-dash-3d.firebasestorage.app",messagingSenderId:"1079420759896",appId:"1:1079420759896:web:3515062c4929587ee73f2d"};
+const app=initializeApp(cfg),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
+const PRIZE={daily:[200,100,50],weekly:[2000,1000,500]},REST=100,WIN={daily:3,weekly:10};
+const prizeFor=(per,rk)=>rk<=3?PRIZE[per][rk-1]:(per=='weekly'&&rk<=10?REST:0);
+const pad2=n=>String(n).padStart(2,'0');
+function pkey(per,off){const d=new Date(Date.now()+5.5*3600e3);   // India time, same as the game
+ if(per=='daily'){d.setUTCDate(d.getUTCDate()-off);return d.getUTCFullYear()+'-'+pad2(d.getUTCMonth()+1)+'-'+pad2(d.getUTCDate())}
+ d.setUTCDate(d.getUTCDate()-off*7-((d.getUTCDay()+6)%7));return 'W'+d.getUTCFullYear()+'-'+pad2(d.getUTCMonth()+1)+'-'+pad2(d.getUTCDate())}
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=n=>'₹'+(Math.round(n*100)/100).toLocaleString('en-IN');
+let admin=null;
+$('login').onclick=()=>signInWithPopup(auth,new GoogleAuthProvider()).catch(e=>$('msg').textContent=e.message);
+onAuthStateChanged(auth,u=>{$('msg').textContent='';
+ if(!u){admin=null;$('panel').hidden=true;$('who').innerHTML='<button id="login2">Sign in with Google</button>';$('login2').onclick=$('login').onclick;return}
+ if(!ADMIN_EMAILS.includes(u.email)||!u.emailVerified){admin=null;$('panel').hidden=true;$('who').innerHTML=esc(u.email)+' <button class="g" id="out">Sign out</button>';$('out').onclick=()=>signOut(auth);$('msg').textContent='This account is not an admin.';return}
+ admin=u;$('panel').hidden=false;$('who').innerHTML='<small>'+esc(u.email)+'</small> <button class="g" id="out">Sign out</button>';$('out').onclick=()=>signOut(auth);loadWd()});
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));$('wd').hidden=b.dataset.t!='wd';$('st').hidden=b.dataset.t!='st';if(b.dataset.t=='wd')loadWd()});
+// ---- withdrawals
+async function loadWd(){const el=$('wd');el.innerHTML='Loading…';
+ try{const s=await getDocs(collection(db,'withdrawals'));
+  const items=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>((a.status=='pending')?0:1)-((b.status=='pending')?0:1)||b.createdAt-a.createdAt).slice(0,100);
+  const bal={};await Promise.all([...new Set(items.filter(x=>x.status=='pending').map(x=>x.uid))].map(async u=>{const w=await getDoc(doc(db,'wallets',u));bal[u]=w.exists()?(w.data().balance||0):0}));
+  el.innerHTML=items.length?items.map(x=>`<div class="card"><div class="row"><b>${esc(x.name||'?')}</b><b>${fmt(x.amount)}</b></div>
+   <div class="row"><span>UPI: <b>${esc(x.upi)}</b></span><button class="g" data-c="${esc(x.upi)}">Copy</button></div>
+   <div class="row"><small>${new Date(x.createdAt).toLocaleString('en-IN')} · <span class="${x.status=='pending'?'pend':x.status=='paid'?'paid':'rej'}">${esc(x.status)}</span>${x.status=='pending'?' · wallet '+fmt(bal[x.uid]||0):''}</small>
+   ${x.status=='pending'?`<span><button data-p="${x.id}">Mark paid</button> <button class="r" data-r="${x.id}">Reject</button></span>`:''}</div></div>`).join(''):'<small>No withdrawal requests yet.</small>';
+  el.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>navigator.clipboard.writeText(b.dataset.c));
+  el.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>pay(items.find(x=>x.id==b.dataset.p)));
+  el.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>rej(b.dataset.r))}
+ catch(e){el.innerHTML='<div id="msg">'+esc(e.message)+'</div>'}}
+async function pay(x){if(!confirm('Send '+fmt(x.amount)+' to '+x.upi+' FIRST, then press OK to mark it paid and deduct it from the wallet.'))return;
+ try{await runTransaction(db,async tx=>{const wr=doc(db,'wallets',x.uid),ws=await tx.get(wr),bal=ws.exists()?(ws.data().balance||0):0;
+   if(bal<x.amount)throw new Error('Wallet balance is lower than the request.');
+   tx.set(wr,{balance:Math.round((bal-x.amount)*100)/100},{merge:true});tx.update(doc(db,'withdrawals',x.id),{status:'paid',paidAt:Date.now(),paidBy:admin.email})});loadWd()}
+ catch(e){alert(e.message)}}
+async function rej(id){if(!confirm('Reject this request? No money is deducted.'))return;
+ try{await runTransaction(db,async tx=>{tx.update(doc(db,'withdrawals',id),{status:'rejected',paidAt:Date.now(),paidBy:admin.email})});loadWd()}catch(e){alert(e.message)}}
+// ---- prizes
+function fillOff(){const per=$('per').value,o=$('off');o.innerHTML='';for(let i=1;i<=(per=='daily'?7:6);i++){const e=document.createElement('option');e.value=i;e.textContent=pkey(per,i)+(i==1?' (latest finished)':'');o.appendChild(e)}}
+$('per').onchange=fillOff;fillOff();
+$('ld').onclick=async()=>{const per=$('per').value,off=+$('off').value,id=per+'_'+pkey(per,off),el=$('win');el.innerHTML='Loading…';
+ try{const done=await getDoc(doc(db,'payouts',id)),s=await getDocs(query(collection(db,'board',id,'users'),orderBy('score','desc'),limit(WIN[per])));
+  const w=s.docs.map((d,i)=>({uid:d.id,rank:i+1,...d.data(),prize:prizeFor(per,i+1)}));
+  el.innerHTML='<div class="card"><b>'+esc(id)+'</b>'+(done.exists()?' <span class="paid">· already credited</span>':'')+'</div>'
+   +(w.map(x=>`<div class="card row"><span>#${x.rank} <b>${esc(x.name)}</b> <small>${x.score} pts</small></span><b>${fmt(x.prize)}</b></div>`).join('')||'<small>No players in this period.</small>')
+   +(w.length&&!done.exists()?'<button id="go">Credit winners to wallets (+5% referral commission)</button>':'');
+  if($('go'))$('go').onclick=()=>credit(id,per,w)}
+ catch(e){el.innerHTML='<div id="msg">'+esc(e.message)+'</div>'}};
+async function credit(id,per,w){if(!confirm('Credit '+w.length+' winners for '+id+'? This can be done only once.'))return;
+ try{const b=writeBatch(db),now=Date.now(),label=per=='daily'?'Daily':'Weekly';let total=0;
+  for(const x of w){const us=await getDoc(doc(db,'users',x.uid)),rb=us.exists()?us.data().referredBy:null;
+   b.set(doc(db,'wallets',x.uid),{name:x.name,balance:increment(x.prize),totalEarned:increment(x.prize)},{merge:true});
+   b.set(doc(collection(db,'credits')),{uid:x.uid,amount:x.prize,type:'prize',note:label+' leaderboard #'+x.rank,createdAt:now});total+=x.prize;
+   if(rb){const c=Math.round(x.prize*5)/100;
+    b.set(doc(db,'wallets',rb),{balance:increment(c),totalEarned:increment(c)},{merge:true});
+    b.set(doc(collection(db,'credits')),{uid:rb,amount:c,type:'referral',note:'5% referral from '+x.name,createdAt:now});
+    b.set(doc(collection(db,'commissions')),{referrer:rb,referee:x.uid,refereeName:x.name,amount:c,createdAt:now});total+=c}}
+  b.set(doc(db,'payouts',id),{at:now,by:admin.email,total,winners:w.map(x=>({uid:x.uid,rank:x.rank,prize:x.prize}))});
+  await b.commit();alert('Done. Credited '+fmt(total));$('ld').click()}
+ catch(e){alert('Failed: '+e.message)}}
+</script></body></html>
