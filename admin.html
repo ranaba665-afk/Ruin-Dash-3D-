@@ -27,7 +27,7 @@ import {initializeApp} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase
 import {getAuth,signInWithPopup,GoogleAuthProvider,onAuthStateChanged,signOut} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import {getFirestore,collection,doc,getDoc,getDocs,query,orderBy,limit,writeBatch,increment,runTransaction} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 // >>> put your own Google account email here (and the same email in firestore.rules)
-const ADMIN_EMAILS=['YOUR_ADMIN_EMAIL@gmail.com'];
+const ADMIN_EMAILS=['ranabagdi467@gmail.com'];
 const cfg={apiKey:"AIzaSyBj6uQByz9wGEZ_qtB2lDAWbZCoIZMfLiU",authDomain:"ruin-dash-3d.firebaseapp.com",projectId:"ruin-dash-3d",storageBucket:"ruin-dash-3d.firebasestorage.app",messagingSenderId:"1079420759896",appId:"1:1079420759896:web:3515062c4929587ee73f2d"};
 const app=initializeApp(cfg),auth=getAuth(app),db=getFirestore(app),$=id=>document.getElementById(id);
 const PRIZE={daily:[200,100,50],weekly:[2000,1000,500]},REST=100,WIN={daily:3,weekly:10};
